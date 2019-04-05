@@ -1,7 +1,7 @@
 // Copyright 2016-present, Facebook, Inc.
 // All rights reserved.
 //
-// This source code is licensed under the license found in the
+// This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include "Metadata/Metadata.h"
@@ -229,7 +229,11 @@ template <Int Dimension>
 void UnPooling_updateGradInput(at::Tensor inputSize, at::Tensor outputSize,
                                at::Tensor poolSize, at::Tensor poolStride,
                                Metadata<Dimension> &m,
-                               at::Tensor input_features,
                                at::Tensor d_input_features,
                                at::Tensor d_output_features,
                                long nFeaturesToDrop);
+
+void CopyFeaturesHelper_updateOutput(at::Tensor rules, at::Tensor context,
+                                     at::Tensor Context);
+void CopyFeaturesHelper_updateGradInput(at::Tensor rules, at::Tensor dcontext,
+                                        at::Tensor dContext);

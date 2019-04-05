@@ -1,7 +1,7 @@
 # Copyright 2016-present, Facebook, Inc.
 # All rights reserved.
 #
-# This source code is licensed under the license found in the
+# This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
 import torch
@@ -57,14 +57,6 @@ for y, line in enumerate(msg):
 locations = torch.LongTensor(locations)
 features = torch.FloatTensor(features)
 input.set_locations(locations, features, 0)
-
-# Optional: allow metadata preprocessing to be done in batch preparation threads
-# to improve GPU utilization.
-#
-# Parameter:
-#    3 if using MP3/2 pooling or C3/2 convolutions for downsizing,
-#    2 if using MP2 pooling for downsizing.
-input.precomputeMetadata(3)
 
 model.train()
 if use_cuda:

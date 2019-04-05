@@ -1,10 +1,10 @@
 # Copyright 2016-present, Facebook, Inc.
 # All rights reserved.
 #
-# This source code is licensed under the license found in the
+# This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import torch, glob, os
+import torch, glob, os, numpy as np
 from .sparseConvNetTensor import SparseConvNetTensor
 from .metadata import Metadata
 
@@ -124,6 +124,16 @@ def batch_location_tensors(location_tensors):
             a.append(pad_with_batch_idx(lt,batch_idx))
     return torch.cat(a,0)
 
+def prepare_BLInput(l,f):
+    with torch.no_grad():
+        n=max([x.size(0) for x in l])
+        L=torch.empty(len(l),n,l[0].size(1)).fill_(-1)
+        F=torch.zeros(len(l),n,f[0].size(1))
+        for i, (ll, ff) in enumerate(zip(l,f)):
+            L[i,:ll.size(0),:].copy_(ll)
+            F[i,:ff.size(0),:].copy_(ff)
+    return (L,F)
+
 def checkpoint_restore(model,exp_name,name2,use_cuda=True,epoch=0):
     if use_cuda:
         model.cpu()
@@ -145,6 +155,8 @@ def checkpoint_restore(model,exp_name,name2,use_cuda=True,epoch=0):
 
 def is_power2(num):
     return num != 0 and ((num & (num - 1)) == 0)
+def has_only_one_nonzero_digit(num): #https://oeis.org/A037124
+    return num != 0 and (num/10**math.floor(math.log(num,10))).is_integer()
 def checkpoint_save(model,exp_name,name2,epoch, use_cuda=True):
     f=exp_name+'-%09d-'%epoch+name2+'.pth'
     model.cpu()
@@ -157,3 +169,25 @@ def checkpoint_save(model,exp_name,name2,epoch, use_cuda=True):
     if os.path.isfile(f):
         if not is_power2(epoch):
             os.remove(f)
+
+def random_rotation(dimension=3):
+    return torch.qr(torch.randn(dimension,dimension))[0]
+
+class LayerNormLeakyReLU(torch.nn.Module):
+    def __init__(self,num_features,leakiness):
+        torch.nn.Module.__init__(self)
+        self.leakiness=leakiness
+        self.in1d=torch.nn.LayerNorm(num_features)
+    def forward(self,x):
+        if x.features.numel():
+            x.features=self.in1d(x.features)
+        x.features=torch.nn.functional.leaky_relu(x.features,self.leakiness,inplace=True)
+        return x
+
+def voxelize_pointcloud(xyz,rgb):
+    xyz,inv,counts=np.unique(xyz.long().numpy(),axis=0,return_inverse=True,return_counts=True)
+    xyz=torch.from_numpy(xyz)
+    inv=torch.from_numpy(inv)
+    rgb_out=torch.zeros(xyz.size(0),rgb.size(1),dtype=torch.float32)
+    rgb_out.index_add_(0,inv,rgb)
+    return xyz, rgb_out/torch.from_numpy(counts[:,None]).float()

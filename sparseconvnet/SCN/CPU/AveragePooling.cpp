@@ -1,7 +1,7 @@
 // Copyright 2016-present, Facebook, Inc.
 // All rights reserved.
 //
-// This source code is licensed under the license found in the
+// This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
 template <typename T>
@@ -82,5 +82,40 @@ void cpu_AveragePooling_updateGradInput(
     AveragePooling_BackwardPass<T>(diF, doF, nPlanes, input_features.stride(0),
                                    d_output_features.stride(0), &r[0], nHot,
                                    _rules.size());
+  }
+}
+
+template <typename T>
+void cpu_CopyFeaturesHelper_updateOutput(at::Tensor rules, at::Tensor context,
+                                         at::Tensor Context) {
+  Int nHot = rules.size(0) / 2;
+  Int nPlanes = context.size(1);
+  auto iF = context.data<T>();
+  auto oF = Context.data<T>();
+  auto r = rules.data<Int>();
+  Int outSite;
+#pragma omp parallel for private(outSite)
+  for (outSite = 0; outSite < nHot; outSite++) {
+    Int i = r[2 * outSite + 1] * nPlanes;
+    Int o = r[2 * outSite] * nPlanes;
+    std::memcpy(oF + o, iF + i, nPlanes * sizeof(T));
+  }
+}
+template <typename T>
+void cpu_CopyFeaturesHelper_updateGradInput(at::Tensor rules,
+                                            at::Tensor dcontext,
+                                            at::Tensor dContext) {
+  Int nHot = rules.size(0) / 2;
+  Int nPlanes = dcontext.size(1);
+  auto iF = dcontext.data<T>();
+  auto oF = dContext.data<T>();
+  auto r = rules.data<Int>();
+  Int outSite;
+#pragma omp parallel for private(outSite)
+  for (outSite = 0; outSite < nHot; outSite++) {
+    Int i = r[2 * outSite + 1] * nPlanes;
+    Int o = r[2 * outSite] * nPlanes;
+    for (Int plane = 0; plane < nPlanes; plane++)
+      iF[i + plane] = oF[o + plane];
   }
 }

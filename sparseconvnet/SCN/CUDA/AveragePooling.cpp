@@ -1,7 +1,7 @@
 // Copyright 2016-present, Facebook, Inc.
 // All rights reserved.
 //
-// This source code is licensed under the license found in the
+// This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
 template <typename T>
@@ -58,4 +58,34 @@ void cuda_AveragePooling_updateGradInput(
   cuda_AveragePooling_BackwardPass<T>(diF, doF, nPlanes, input_features.size(1),
                                       d_output_features.size(1), _rules,
                                       _rules.size());
+}
+
+template <typename T>
+void cuda_CopyFeaturesHelper_ForwardPass(T *input_features, T *output_features,
+                                         Int *rules, Int nPlanes, Int nHot);
+
+template <typename T>
+void cuda_CopyFeaturesHelper_BackwardPass(T *d_input_features,
+                                          T *d_output_features, Int *rules,
+                                          Int nPlanes, Int nHot);
+
+template <typename T>
+void cuda_CopyFeaturesHelper_updateOutput(at::Tensor rules, at::Tensor context,
+                                          at::Tensor Context) {
+
+  Int nPlanes = context.size(1);
+  Int nHot = rules.size(0) / 2;
+  cuda_CopyFeaturesHelper_ForwardPass<T>(context.data<T>(), Context.data<T>(),
+                                         rules.data<Int>(), nPlanes, nHot);
+}
+
+template <typename T>
+void cuda_CopyFeaturesHelper_updateGradInput(at::Tensor rules,
+                                             at::Tensor dcontext,
+                                             at::Tensor dContext) {
+
+  Int nPlanes = dcontext.size(1);
+  Int nHot = rules.size(0) / 2;
+  cuda_CopyFeaturesHelper_BackwardPass<T>(
+      dcontext.data<T>(), dContext.data<T>(), rules.data<Int>(), nPlanes, nHot);
 }

@@ -1,7 +1,7 @@
 # Copyright 2016-present, Facebook, Inc.
 # All rights reserved.
 #
-# This source code is licensed under the license found in the
+# This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
 import sparseconvnet as scn
@@ -200,7 +200,7 @@ def SparseResNet(dimension, nInputPlanes, layers):
     return m
 
 
-def UNet(dimension, reps, nPlanes, residual_blocks=False, downsample=[2, 2], leakiness=0):
+def UNet(dimension, reps, nPlanes, residual_blocks=False, downsample=[2, 2], leakiness=0, n_input_planes=-1):
     """
     U-Net style network with VGG or ResNet-style blocks.
     For voxel level prediction:
@@ -232,15 +232,12 @@ def UNet(dimension, reps, nPlanes, residual_blocks=False, downsample=[2, 2], lea
             m.add(scn.Sequential()
                  .add(scn.BatchNormLeakyReLU(a,leakiness=leakiness))
                  .add(scn.SubmanifoldConvolution(dimension, a, b, 3, False)))
-    def U(nPlanes): #Recursive function
+    def U(nPlanes,n_input_planes=-1): #Recursive function
         m = scn.Sequential()
-        if len(nPlanes) == 1:
-            for _ in range(reps):
-                block(m, nPlanes[0], nPlanes[0])
-        else:
-            m = scn.Sequential()
-            for _ in range(reps):
-                block(m, nPlanes[0], nPlanes[0])
+        for i in range(reps):
+            block(m, n_input_planes if n_input_planes!=-1 else nPlanes[0], nPlanes[0])
+            n_input_planes=-1
+        if len(nPlanes) > 1:
             m.add(
                 scn.ConcatTable().add(
                     scn.Identity()).add(
@@ -256,7 +253,7 @@ def UNet(dimension, reps, nPlanes, residual_blocks=False, downsample=[2, 2], lea
             for i in range(reps):
                 block(m, nPlanes[0] * (2 if i == 0 else 1), nPlanes[0])
         return m
-    m = U(nPlanes)
+    m = U(nPlanes,n_input_planes)
     return m
 
 def FullyConvolutionalNet(dimension, reps, nPlanes, residual_blocks=False, downsample=[2, 2]):

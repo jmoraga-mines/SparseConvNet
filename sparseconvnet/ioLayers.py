@@ -1,7 +1,7 @@
 # Copyright 2016-present, Facebook, Inc.
 # All rights reserved.
 #
-# This source code is licensed under the license found in the
+# This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
 import sparseconvnet.SCN
@@ -42,6 +42,11 @@ class InputLayer(Module):
         self.dimension = dimension
         self.spatial_size = toLongTensor(dimension, spatial_size)
         self.mode = mode
+        self.device = None
+
+    def to(self, device):
+        self.device=device
+        return self
 
     def forward(self, input):
         output = SparseConvNetTensor(
@@ -52,8 +57,8 @@ class InputLayer(Module):
             self.dimension,
             output.metadata,
             self.spatial_size,
-            input[0].type(torch.LongTensor),
-            input[1],
+            input[0].cpu().long(),
+            input[1].to(self.device) if self.device else input[1],
             0 if len(input) == 2 else input[2],
             self.mode
         )
@@ -109,7 +114,11 @@ class BLInputLayer(Module):
         self.dimension = dimension
         self.spatial_size = toLongTensor(dimension, spatial_size)
         self.mode = mode
-    # (coords,input_features) = input
+        self.device = None
+
+    def to(self, device):
+        self.device=device
+        return self
 
     def forward(self, input):
         output = SparseConvNetTensor(
@@ -120,8 +129,8 @@ class BLInputLayer(Module):
             self.dimension,
             output.metadata,
             self.spatial_size,
-            input[0].type(torch.LongTensor),
-            input[1],
+            input[0].cpu().long(),
+            input[1].to(self.device) if self.device else input[1],
             self.mode
         )
         return output

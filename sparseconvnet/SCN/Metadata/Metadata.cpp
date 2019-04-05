@@ -1,7 +1,7 @@
 // Copyright 2016-present, Facebook, Inc.
 // All rights reserved.
 //
-// This source code is licensed under the license found in the
+// This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include "Metadata.h"
@@ -145,15 +145,13 @@ void Metadata<dimension>::setInputSpatialLocations(
 }
 
 template <Int dimension>
-void Metadata<dimension>::getSpatialLocations(/*long*/ at::Tensor spatialSize,
-                                              /*long*/ at::Tensor locations) {
+at::Tensor
+Metadata<dimension>::getSpatialLocations(/*long*/ at::Tensor spatialSize) {
   Int nActive = getNActive(spatialSize);
   auto &SGs = getSparseGrid(spatialSize);
   Int batchSize = SGs.size();
 
-  locations.resize_({(int)nActive, dimension + 1});
-  locations.zero_();
-
+  auto locations = torch::zeros({(int)nActive, dimension + 1}, at::kLong);
   auto lD = locations.data<long>();
 
   for (Int i = 0; i < batchSize; i++) {
@@ -166,6 +164,7 @@ void Metadata<dimension>::getSpatialLocations(/*long*/ at::Tensor spatialSize,
       lD[(it->second + offset) * (dimension + 1) + dimension] = i;
     }
   }
+  return locations;
 }
 template <Int dimension>
 void Metadata<dimension>::createMetadataForDenseToSparse(
@@ -255,34 +254,32 @@ void Metadata<dimension>::appendMetadata(Metadata<dimension> &mAdd,
 }
 
 template <Int dimension>
-at::Tensor
-Metadata<dimension>::sparsifyCompare(Metadata<dimension> &mReference,
-                                     Metadata<dimension> &mSparsified,
+std::vector<at::Tensor>
+Metadata<dimension>::sparsifyCompare(Metadata<dimension> &mGT,
                                      /*long*/ at::Tensor spatialSize) {
   auto p = LongTensorToPoint<dimension>(spatialSize);
-  at::Tensor delta = at::zeros({nActive[p]}, at::kFloat);
-  float *deltaPtr = delta.data<float>();
-  auto &sgsReference = mReference.grids[p];
+  at::Tensor gt = torch::zeros({nActive[p]}, at::kByte);
+  at::Tensor ref_map = torch::empty({mGT.nActive[p]}, at::kLong);
+  long *ref_map_ptr = ref_map.data<long>();
+  unsigned char *gt_ptr = gt.data<unsigned char>();
+  auto &sgsGT = mGT.grids[p];
   auto &sgsFull = grids[p];
-  auto &sgsSparsified = mSparsified.grids[p];
   Int batchSize = sgsFull.size();
   Int sample;
 
 #pragma omp parallel for private(sample)
   for (sample = 0; sample < (Int)batchSize; ++sample) {
-    auto &sgReference = sgsReference[sample];
+    auto &sgGT = sgsGT[sample];
     auto &sgFull = sgsFull[sample];
-    auto &sgSparsified = sgsSparsified[sample];
-    for (auto const &iter : sgFull.mp) {
-      bool gt = sgReference.mp.find(iter.first) != sgReference.mp.end();
-      bool hot = sgSparsified.mp.find(iter.first) != sgSparsified.mp.end();
-      if (gt and not hot)
-        deltaPtr[iter.second + sgFull.ctr] = -1;
-      if (hot and not gt)
-        deltaPtr[iter.second + sgFull.ctr] = +1;
+    for (auto const &iter : sgGT.mp) {
+      auto f = sgFull.mp.find(iter.first);
+      if (f != sgFull.mp.end()) {
+        ref_map_ptr[iter.second + sgGT.ctr] = f->second + sgFull.ctr;
+        gt_ptr[f->second + sgFull.ctr] = +1;
+      }
     }
   }
-  return delta;
+  return {gt, ref_map};
 }
 
 // tensor is size[0] x .. x size[dimension-1] x size[dimension]
@@ -563,6 +560,19 @@ RuleBook &Metadata<dimension>::getRandomizedStrideRuleBook(
   return rb;
 }
 
+at::Tensor vvl2t(std::vector<std::vector<long>> v) {
+  long s = 0;
+  for (auto &x : v)
+    s += x.size();
+  at::Tensor t = torch::empty({s}, at::CPU(at::kLong));
+  long *p = t.data<long>();
+  for (auto &x : v) {
+    std::memcpy(p, &x[0], x.size() * sizeof(long));
+    p += x.size();
+  }
+  return t;
+}
+
 template <Int dimension>
 std::vector<at::Tensor>
 Metadata<dimension>::compareSparseHelper(Metadata<dimension> &mR,
@@ -570,35 +580,69 @@ Metadata<dimension>::compareSparseHelper(Metadata<dimension> &mR,
   auto p = LongTensorToPoint<dimension>(spatialSize);
   auto &sgsL = grids[p];
   auto &sgsR = mR.grids[p];
-  std::vector<long> cL, cR, L, R;
-  for (Int sample = 0; sample < (Int)sgsL.size(); ++sample) {
+  Int bs = sgsL.size(), sample;
+  std::vector<std::vector<long>> cL(bs), cR(bs), L(bs), R(bs);
+#pragma omp parallel for private(sample)
+  for (sample = 0; sample < bs; ++sample) {
     auto &sgL = sgsL[sample];
     auto &sgR = sgsR[sample];
+    auto &cLs = cL[sample];
+    auto &cRs = cR[sample];
+    auto &Ls = L[sample];
+    auto &Rs = R[sample];
     for (auto const &iter : sgL.mp) {
       if (sgR.mp.find(iter.first) == sgR.mp.end()) {
-        L.push_back(sgL.mp[iter.first] + sgL.ctr);
+        Ls.push_back(sgL.mp[iter.first] + sgL.ctr);
       } else {
-        cL.push_back(sgL.mp[iter.first] + sgL.ctr);
-        cR.push_back(sgR.mp[iter.first] + sgR.ctr);
+        cLs.push_back(sgL.mp[iter.first] + sgL.ctr);
+        cRs.push_back(sgR.mp[iter.first] + sgR.ctr);
       }
     }
     for (auto const &iter : sgR.mp) {
       if (sgL.mp.find(iter.first) == sgL.mp.end()) {
-        R.push_back(sgR.mp[iter.first] + sgR.ctr);
+        Rs.push_back(sgR.mp[iter.first] + sgR.ctr);
       }
     }
   }
-  at::Tensor cL_ = at::empty({(long)cL.size()}, at::CPU(at::kLong));
-  std::memcpy(cL_.data<long>(), &cL[0], cL.size() * sizeof(long));
-  at::Tensor cR_ = at::empty({(long)cR.size()}, at::CPU(at::kLong));
-  std::memcpy(cR_.data<long>(), &cR[0], cR.size() * sizeof(long));
-  at::Tensor L_ = at::empty({(long)L.size()}, at::CPU(at::kLong));
-  std::memcpy(L_.data<long>(), &L[0], L.size() * sizeof(long));
-  at::Tensor R_ = at::empty({(long)R.size()}, at::CPU(at::kLong));
-  std::memcpy(R_.data<long>(), &R[0], R.size() * sizeof(long));
-  return {cL_, cR_, L_, R_};
+  return {vvl2t(cL), vvl2t(cR), vvl2t(L), vvl2t(R)};
 }
 
+at::Tensor vvl2t_(std::vector<std::vector<Int>> v) {
+  long s = 0;
+  for (auto &x : v)
+    s += x.size();
+  at::Tensor t = torch::empty({s}, at::CPU(at_kINT));
+  Int *p = t.data<Int>();
+  for (auto &x : v) {
+    std::memcpy(p, &x[0], x.size() * sizeof(Int));
+    p += x.size();
+  }
+  return t;
+}
+
+template <Int dimension>
+at::Tensor
+Metadata<dimension>::copyFeaturesHelper(Metadata<dimension> &mR,
+                                        /* long */ at::Tensor spatialSize) {
+  auto p = LongTensorToPoint<dimension>(spatialSize);
+  auto &sgsL = grids[p];
+  auto &sgsR = mR.grids[p];
+  Int bs = sgsL.size(), sample;
+  std::vector<std::vector<Int>> r(bs);
+#pragma omp parallel for private(sample)
+  for (sample = 0; sample < bs; ++sample) {
+    auto &sgL = sgsL[sample];
+    auto &sgR = sgsR[sample];
+    auto &rs = r[sample];
+    for (auto const &iter : sgL.mp) {
+      if (sgR.mp.find(iter.first) != sgR.mp.end()) {
+        rs.push_back(sgL.mp[iter.first] + sgL.ctr);
+        rs.push_back(sgR.mp[iter.first] + sgR.ctr);
+      }
+    }
+  }
+  return vvl2t_(r);
+}
 template <Int dimension> Int volume(long *point) {
   Int v = 1;
   for (Int i = 0; i < dimension; i++)

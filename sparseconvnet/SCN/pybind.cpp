@@ -1,7 +1,7 @@
 // Copyright 2016-present, Facebook, Inc.
 // All rights reserved.
 //
-// This source code is licensed under the license found in the
+// This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
 #include <torch/extension.h>
@@ -28,7 +28,8 @@ template <Int Dimension> void dimension(py::module &m, const char *name) {
            &Metadata<Dimension>::addSampleFromThresholdedTensor)
       .def("generateRuleBooks3s2", &Metadata<Dimension>::generateRuleBooks3s2)
       .def("generateRuleBooks2s2", &Metadata<Dimension>::generateRuleBooks2s2)
-      .def("compareSparseHelper", &Metadata<Dimension>::compareSparseHelper);
+      .def("compareSparseHelper", &Metadata<Dimension>::compareSparseHelper)
+      .def("copyFeaturesHelper", &Metadata<Dimension>::copyFeaturesHelper);
   m.def("ActivePooling_updateOutput",
         (void (*)(at::Tensor, Metadata<Dimension> &, at::Tensor, at::Tensor,
                   bool)) &
@@ -191,8 +192,7 @@ template <Int Dimension> void dimension(py::module &m, const char *name) {
         "");
   m.def("UnPooling_updateGradInput",
         (void (*)(at::Tensor, at::Tensor, at::Tensor, at::Tensor,
-                  Metadata<Dimension> &, at::Tensor, at::Tensor, at::Tensor,
-                  long)) &
+                  Metadata<Dimension> &, at::Tensor, at::Tensor, long)) &
             UnPooling_updateGradInput,
         "");
 }
@@ -226,6 +226,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "");
   m.def("NetworkInNetwork_accGradParameters",
         &NetworkInNetwork_accGradParameters, "");
+  m.def("CopyFeaturesHelper_updateOutput", &CopyFeaturesHelper_updateOutput,
+        "");
+  m.def("CopyFeaturesHelper_updateGradInput",
+        &CopyFeaturesHelper_updateGradInput, "");
 
   m.def("n_rulebook_bits", []() { return 8 * sizeof(Int); }, "");
 }
